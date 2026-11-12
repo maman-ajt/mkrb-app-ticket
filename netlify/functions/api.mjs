@@ -11,6 +11,7 @@ export default async (request) => {
       authorization: request.headers.get("authorization"),
       contentType: request.headers.get("content-type"),
       origin: request.headers.get("origin"),
+      userToken: request.headers.get("x-youtrack-token"),
       host: url.host,
       body,
     },

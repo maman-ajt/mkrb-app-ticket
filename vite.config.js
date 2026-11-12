@@ -26,6 +26,7 @@ function ticketApi() {
         authorization: req.headers.authorization,
         contentType: req.headers["content-type"],
         origin: req.headers.origin,
+        userToken: req.headers["x-youtrack-token"],
         host: req.headers.host,
         body,
       },
