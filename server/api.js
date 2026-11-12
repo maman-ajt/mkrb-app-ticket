@@ -5,7 +5,10 @@ const BOARD = "Board Jobseeker App Delivery: {Current sprint}";
 const QUERY = `${BOARD} has: -{Due Date} State: {In Preparation}`;
 
 // Hash first so lengths match, then constant-time compare.
-const sha = (v) => createHash("sha256").update(String(v ?? "")).digest();
+const sha = (v) =>
+  createHash("sha256")
+    .update(String(v ?? ""))
+    .digest();
 const same = (a, b) => timingSafeEqual(sha(a), sha(b));
 
 const json = (status, body) => ({ status, body });
@@ -26,7 +29,8 @@ export async function handle(req, env) {
       headers: { "WWW-Authenticate": 'Basic realm="tickets"' },
     };
 
-  // token defaults to the server's own; /api/me/* passes the visitor's personal token (used per request, never stored).
+  // Due-date list/save always use the server's .env token. Only /api/me/* (move my tickets)
+  // passes the visitor's personal token explicitly; it is used per request and never stored.
   const yt = (path, init = {}, token = env.YOUTRACK_TOKEN) =>
     fetch(YT + path, {
       ...init,
@@ -51,55 +55,71 @@ export async function handle(req, env) {
       if (!mr.ok) return json(403, { error: "Invalid token" });
       const me = await mr.json();
 
-      if (req.method === "GET" && req.pathname === "/api/me") {
-        const q = `${BOARD} for: me State: -Completed`;
+      // My tickets waiting to ship: assigned to the token's user, in Ready to Deploy.
+      const mine = async () => {
+        const q = `${BOARD} for: me State: {Ready to Deploy}`;
         const r = await yt(
-          `/api/issues?query=${encodeURIComponent(q)}&$top=200&fields=idReadable,summary,customFields(name,value(name))`,
+          `/api/issues?query=${encodeURIComponent(q)}&$top=200&fields=idReadable,summary,customFields(name,$type,value(name,login))`,
           {},
           tok,
         );
         const data = await r.json();
-        if (!r.ok) return json(r.status, data);
-        return json(200, {
-          user: { login: me.login, name: me.fullName },
-          tickets: data.map((i) => ({
+        if (!r.ok) throw Object.assign(new Error("youtrack"), { status: r.status, data });
+        return data.map((i) => {
+          const f = (n) => i.customFields?.find((x) => x.name === n);
+          return {
             id: i.idReadable,
             summary: i.summary,
-            state:
-              i.customFields?.find((f) => f.name === "State")?.value?.name ??
-              null,
-          })),
+            state: f("State")?.value?.name ?? null,
+            stateType: f("State")?.$type,
+            assignee: f("Assignee")?.value?.login,
+          };
         });
-      }
+      };
 
-      const c = req.pathname.match(/^\/api\/me\/tickets\/([\w-]+)\/complete$/);
-      if (req.method === "POST" && c) {
-        if (csrfBad()) return json(403, { error: "forbidden" });
-        const ir = await yt(
-          `/api/issues/${c[1]}?fields=customFields(name,$type,value(login))`,
-          {},
-          tok,
-        );
-        if (!ir.ok) return json(ir.status, await ir.json());
-        const fields = (await ir.json()).customFields ?? [];
-        // Only the assignee may complete: the token's user must equal the issue's Assignee.
-        if (fields.find((f) => f.name === "Assignee")?.value?.login !== me.login)
-          return json(403, { error: "not assigned to you" });
-        const type = fields.find((f) => f.name === "State")?.$type;
-        if (!type) return json(400, { error: 'no "State" field on ' + c[1] });
-        const r = await yt(
-          `/api/issues/${c[1]}?fields=id`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              customFields: [
-                { name: "State", $type: type, value: { name: "Completed" } },
-              ],
-            }),
-          },
-          tok,
-        );
-        return json(r.ok ? 200 : r.status, r.ok ? { ok: true } : await r.json());
+      try {
+        if (req.method === "GET" && req.pathname === "/api/me") {
+          const list = await mine();
+          return json(200, {
+            user: { login: me.login, name: me.fullName },
+            tickets: list.map(({ id, summary, state }) => ({ id, summary, state })),
+          });
+        }
+
+        // Move every one of my Ready to Deploy tickets to Completed in one request.
+        if (req.method === "POST" && req.pathname === "/api/me/complete-all") {
+          if (csrfBad()) return json(403, { error: "forbidden" });
+          const done = [];
+          const failed = {};
+          for (const t of await mine()) {
+            // Only the assignee may complete: re-check, never trust the search alone.
+            if (t.assignee !== me.login || !t.stateType) {
+              failed[t.id] = "not assigned to you";
+              continue;
+            }
+            const r = await yt(
+              `/api/issues/${t.id}?fields=id`,
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  customFields: [
+                    { name: "State", $type: t.stateType, value: { name: "Completed" } },
+                  ],
+                }),
+              },
+              tok,
+            );
+            if (r.ok) done.push(t.id);
+            else {
+              const e = await r.json().catch(() => ({}));
+              failed[t.id] = e.error_description || e.error || `HTTP ${r.status}`;
+            }
+          }
+          return json(200, { done, failed });
+        }
+      } catch (e) {
+        if (e.status) return json(e.status, e.data);
+        throw e;
       }
       return json(404, { error: "not found" });
     }
@@ -135,7 +155,9 @@ export async function handle(req, env) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
         return json(400, { error: "bad date" });
       // YouTrack rejects customFields without $type, and it depends on the field kind: resolve it from the issue first.
-      const tr = await yt(`/api/issues/${m[1]}?fields=customFields(name,$type)`);
+      const tr = await yt(
+        `/api/issues/${m[1]}?fields=customFields(name,$type)`,
+      );
       if (!tr.ok) return json(tr.status, await tr.json());
       const type = (await tr.json()).customFields?.find(
         (f) => f.name === "Due Date",

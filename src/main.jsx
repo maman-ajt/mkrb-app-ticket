@@ -74,7 +74,6 @@ function MyTickets() {
   const [me, setMe] = useState(null)
   const [list, setList] = useState([])
   const [err, setErr] = useState('')
-  const [rowErr, setRowErr] = useState({})
   const [busy, setBusy] = useState(false)
 
   const call = (path, tok, init = {}) =>
@@ -107,19 +106,21 @@ function MyTickets() {
     setToken(null)
     setMe(null)
     setList([])
-    setRowErr({})
-  }
-  const complete = async (id) => {
-    setRowErr((e) => ({ ...e, [id]: '' }))
-    const r = await call(`/api/me/tickets/${id}/complete`, token, { method: 'POST', body: '{}' })
-    if (r.ok) return setList((l) => l.filter((t) => t.id !== id))
-    const e = await r.json().catch(() => ({}))
-    setRowErr((x) => ({ ...x, [id]: e.error_description || e.error || `Failed (${r.status})` }))
   }
   const completeAll = async () => {
-    if (!confirm(`Move ${list.length} ticket(s) to Completed?`)) return
+    if (!confirm(`Move all ${list.length} Ready to Deploy ticket(s) to Completed?`)) return
     setBusy(true)
-    for (const t of list) await complete(t.id)
+    setErr('')
+    try {
+      const r = await call('/api/me/complete-all', token, { method: 'POST', body: '{}' })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.error_description || d.error || `Failed (${r.status})`)
+      setList((l) => l.filter((t) => !d.done.includes(t.id)))
+      const f = Object.entries(d.failed)
+      if (f.length) setErr(`${f.length} failed: ${f.slice(0, 3).map(([id, m]) => `${id} (${m})`).join('; ')}`)
+    } catch (e) {
+      setErr(e.message)
+    }
     setBusy(false)
   }
 
@@ -147,15 +148,16 @@ function MyTickets() {
         <>
           <div className="mehead">
             <div>
-              <strong>{me.name}</strong> <span className="hint">@{me.login} · your tickets not Completed</span>
+              <strong>{me.name}</strong> <span className="hint">@{me.login} · your tickets in Ready to Deploy</span>
             </div>
             <div className="mebtns">
-              {list.length > 0 && <button className="primary" disabled={busy} onClick={completeAll}>{busy ? 'Working…' : `Complete all ${list.length}`}</button>}
+              {list.length > 0 && <button className="primary" disabled={busy} onClick={completeAll}>{busy ? 'Working…' : `Move all ${list.length} to Completed`}</button>}
               <button className="ghost" onClick={logout}>Disconnect</button>
             </div>
           </div>
+          {err && <p className="err" role="alert">{err}</p>}
           {list.length === 0 ? (
-            <p className="empty" role="status">Nothing left to complete.</p>
+            <p className="empty" role="status">No tickets in Ready to Deploy.</p>
           ) : (
             <ul className="mylist">
               {list.map((t) => (
@@ -163,8 +165,6 @@ function MyTickets() {
                   <a href={YT + t.id} target="_blank" rel="noreferrer">{t.id}</a>
                   <span className="sum">{t.summary}</span>
                   <span className="st">{t.state}</span>
-                  <button className="ghost" disabled={busy} onClick={() => complete(t.id)}>Mark completed</button>
-                  {rowErr[t.id] && <span className="err" role="alert">{rowErr[t.id]}</span>}
                 </li>
               ))}
             </ul>
