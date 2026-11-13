@@ -6,6 +6,37 @@ import './index.css'
 const YT = 'https://brightan.myjetbrains.com/youtrack/issue/'
 const NONE = 'Unassigned'
 
+// Brand themes; colors here only feed the favicon, page colors live in index.css.
+const THEMES = { ajt: ['AJobThing', '#FAA221', '#111827'], rb: ['Ricebowl', '#25A67F', '#111827'], mk: ['Maukerja', '#D62F40', '#fff'] }
+const store = {
+  get: () => { try { return localStorage.getItem('theme') } catch { return null } },
+  set: (v) => { try { localStorage.setItem('theme', v) } catch { /* private mode */ } },
+}
+const applyTheme = (k) => {
+  const [, bg, fg] = THEMES[k]
+  document.documentElement.dataset.theme = k
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="${bg}"/><path d="M6 11a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v2.5a2.5 2.5 0 0 0 0 5V21a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-2.5a2.5 2.5 0 0 0 0-5z" fill="none" stroke="${fg}" stroke-width="2" stroke-linejoin="round"/><path d="M20 10v12" stroke="${fg}" stroke-width="2" stroke-dasharray="2 2"/></svg>`
+  document.getElementById('fav').href = 'data:image/svg+xml,' + encodeURIComponent(svg)
+}
+const initialTheme = THEMES[store.get()] ? store.get() : 'ajt'
+applyTheme(initialTheme)
+
+function ThemePicker() {
+  const [theme, setTheme] = useState(initialTheme)
+  const pick = (k) => {
+    setTheme(k)
+    applyTheme(k)
+    store.set(k)
+  }
+  return (
+    <select aria-label="Theme" value={theme} onChange={(e) => pick(e.target.value)}>
+      {Object.entries(THEMES).map(([k, [name]]) => <option key={k} value={k}>{name}</option>)}
+    </select>
+  )
+}
+
+const unassignedOk = (n) => !n || confirm(`${n} ticket(s) have no assignee. Set due date anyway?`)
+
 // Next Thursday (today if Thursday), local time, as YYYY-MM-DD.
 const nextThursday = () => {
   const d = new Date()
@@ -47,6 +78,7 @@ function Row({ t, checked, onToggle, onDone }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const save = async () => {
+    if (!unassignedOk(t.assignee ? 0 : 1)) return
     setBusy(true)
     setErr('')
     const e = await setDue(t.id, date)
@@ -182,6 +214,7 @@ function App() {
   const [bulkDate, setBulkDate] = useState(nextThursday())
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkErr, setBulkErr] = useState('')
+  const [closed, setClosed] = useState(() => new Set())
 
   const load = () => {
     setTickets(null)
@@ -216,6 +249,7 @@ function App() {
 
   const bulkSave = async () => {
     const ids = [...sel]
+    if (!unassignedOk(tickets.filter((t) => sel.has(t.id) && !t.assignee).length)) return
     setBulkBusy(true)
     setBulkErr('')
     const done = []
@@ -240,7 +274,10 @@ function App() {
           <h1>Missing due dates{tickets?.length > 0 && <span className="count">{tickets.length}</span>}</h1>
           <p className="sub">Jobseeker App Delivery · Current sprint · In Preparation</p>
         </div>
-        <button className="ghost" onClick={load}>Refresh</button>
+        <div className="hbtns">
+          <ThemePicker />
+          <button className="ghost" onClick={load}>Refresh</button>
+        </div>
       </header>
 
       {tickets?.length > 0 && (
@@ -276,18 +313,28 @@ function App() {
               {groups.map(([who, list]) => {
                 const ids = list.map((t) => t.id)
                 const n = ids.filter((i) => sel.has(i)).length
+                const open = !closed.has(who)
+                const flip = () => setClosed((s) => {
+                  const c = new Set(s)
+                  if (open) c.add(who)
+                  else c.delete(who)
+                  return c
+                })
                 return (
                   <tbody key={who}>
                     <tr className="grp">
-                      <td colSpan={4}>
+                      <td colSpan={4}><div className="gb">
+                        <button className="exp" aria-expanded={open} aria-label={`${open ? 'Collapse' : 'Expand'} ${who}`} onClick={flip}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+                        </button>
                         <label>
                           <Check checked={n === ids.length} indeterminate={n > 0 && n < ids.length} onChange={(e) => toggle(ids, e.target.checked)} label={`Select all of ${who}`} />
                           <strong>{who}</strong>
                           <span className="count">{ids.length}</span>
                         </label>
-                      </td>
+                      </div></td>
                     </tr>
-                    {list.map((t) => (
+                    {open && list.map((t) => (
                       <Row key={t.id} t={t} checked={sel.has(t.id)} onToggle={(e) => toggle([t.id], e.target.checked)} onDone={remove} />
                     ))}
                   </tbody>

@@ -2,10 +2,22 @@
 :root{
   --colorTxtPrimary:#D1D5DB;--colorTxtPrimaryVariant:#fff;--colorTxtError:#F87171;
   --colorBg:#111827;--colorBgAlt:#1F2937;--colorBgContainer:#1B2332;--colorOutlineGeneral:#374151;
-  --brand:#D62F40;--brand-h:#C42838;--brand-t:#FB8591;--brand-bg:#4C1D24;
+  --brand:#D62F40;--brand-h:#C42838;--brand-t:#FB8591;--brand-bg:#4C1D24;--on-brand:#fff;
   --roundedLg:8px;--rounded2Xl:16px;--space:16px;
   --font:'Noto Sans',system-ui,sans-serif;
   color-scheme:dark;
+}
+/* Brand themes (set on <html data-theme>); MK uses the :root defaults. Light brands get dark text for contrast. */
+[data-theme=ajt]{--brand:#FAA221;--brand-h:#E8901A;--brand-t:#FCC46B;--brand-bg:#4A3313;--on-brand:#111827}
+[data-theme=rb]{--brand:#25A67F;--brand-h:#1F9270;--brand-t:#5FD3AE;--brand-bg:#123D31;--on-brand:#111827}
+/* Checkbox marks, stroke = --on-brand (CSS can't inject a var into a data URL). */
+:root{
+  --mark-check:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  --mark-dash:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3.5' stroke-linecap='round'%3E%3Cpath d='M6 12h12'/%3E%3C/svg%3E");
+}
+[data-theme=ajt],[data-theme=rb]{
+  --mark-check:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  --mark-dash:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='3.5' stroke-linecap='round'%3E%3Cpath d='M6 12h12'/%3E%3C/svg%3E");
 }
 *{box-sizing:border-box}
 body{margin:0;font:400 14px/1.5 var(--font);background:var(--colorBg);color:var(--colorTxtPrimary)}
@@ -24,10 +36,10 @@ td.id a{font-weight:700;font-variant-numeric:tabular-nums;color:var(--brand-t);t
 td.id a:hover{text-decoration:underline}
 td.sum{max-width:420px;overflow-wrap:anywhere}
 .act{white-space:nowrap}
-button,input{font:inherit;min-height:40px;border-radius:var(--roundedLg);border:1px solid var(--colorOutlineGeneral);background:var(--colorBgContainer);color:var(--colorTxtPrimary);padding:6px 12px}
+button,input,select{font:inherit;min-height:40px;border-radius:var(--roundedLg);border:1px solid var(--colorOutlineGeneral);background:var(--colorBgContainer);color:var(--colorTxtPrimary);padding:6px 12px}
 input[type=date]{margin-right:8px}
 button{cursor:pointer;font-weight:700;transition:background-color .15s,transform .1s}
-button.primary{background:var(--brand);color:var(--colorTxtPrimaryVariant);border-color:transparent}
+button.primary{background:var(--brand);color:var(--on-brand);border-color:transparent}
 button.primary:hover:not(:disabled){background:var(--brand-h)}
 button.ghost:hover:not(:disabled){background:var(--colorBg)}
 button:active:not(:disabled){transform:scale(.97)}
@@ -39,11 +51,21 @@ button:disabled{opacity:.5;cursor:not-allowed}
 @keyframes sh{to{background-position:-200% 0}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .empty svg{color:var(--brand-t);margin-bottom:8px}.empty p{margin:0}.empty strong{font-size:16px}
-.chk{width:20px;height:20px;min-height:0;padding:0;margin:0;accent-color:var(--brand);cursor:pointer;flex:none}
+.chk{appearance:none;width:22px;height:22px;min-height:0;padding:0;margin:0;cursor:pointer;flex:none;border:2px solid #6B7280;background:var(--colorBgContainer) center/16px no-repeat;transition:background-color .15s,border-color .15s}
+.chk:checked,.chk:indeterminate{background-color:var(--brand);border-color:var(--brand)}
+.chk:checked{background-image:var(--mark-check)}
+.chk:indeterminate{background-image:var(--mark-dash)}
 th.pick,td.pick{width:44px;padding-right:0}
-tr.sel{background:var(--brand-bg)!important}
+tr.sel{background:color-mix(in srgb,var(--brand) 8%,transparent)!important}
 tr.grp td{background:var(--colorBgAlt);padding:10px var(--space);border-top:1px solid var(--colorOutlineGeneral)}
-tr.grp label{display:flex;align-items:center;gap:10px;cursor:pointer}
+.gb{display:flex;align-items:center;gap:6px}
+tr.grp label{display:flex;align-items:center;gap:10px;cursor:pointer;flex:1}
+button.exp{min-height:32px;width:32px;padding:0;display:grid;place-items:center;border-color:transparent;background:none}
+button.exp:hover{background:var(--colorBg)}
+button.exp svg{transition:transform .15s}
+button.exp[aria-expanded=true] svg{transform:rotate(90deg)}
+.hbtns{display:flex;gap:8px}
+select{cursor:pointer;appearance:none;padding-right:40px;background:var(--colorBgContainer) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center/16px}
 tr.grp .count{margin:0}
 .bulk{position:sticky;top:8px;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px var(--space);margin-bottom:var(--space)}
 .bulk .all{display:flex;align-items:center;gap:10px;font-weight:700;cursor:pointer;margin-right:auto}
@@ -67,7 +89,8 @@ tr.grp .count{margin:0}
   .act input{flex:1 1 150px;margin:0}
   .act button{flex:1 1 150px}
   .act .err{margin:0;flex-basis:100%}
-  header button{width:100%}
+  .hbtns{width:100%}
+  .hbtns>*{flex:1}
 }
 
 .me{margin-top:calc(var(--space)*2);padding:var(--space)}
