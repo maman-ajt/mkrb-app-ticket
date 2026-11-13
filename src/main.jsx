@@ -35,7 +35,23 @@ function ThemePicker() {
   )
 }
 
-const unassignedOk = (n) => !n || confirm(`${n} ticket(s) have no assignee. Set due date anyway?`)
+// Native confirm() is silently blocked in sandboxed iframes (e.g. VS Code Simple Browser), so use <dialog>.
+// Resolves true only on the primary button; Esc/Cancel resolve false.
+const ask = (msg, ok) => new Promise((resolve) => {
+  const d = document.createElement('dialog')
+  d.className = 'dlg'
+  d.innerHTML = '<p></p><form method="dialog"><button class="ghost" value="">Cancel</button><button class="primary" value="ok"></button></form>'
+  d.querySelector('p').textContent = msg
+  d.querySelector('.primary').textContent = ok
+  d.addEventListener('close', () => {
+    resolve(d.returnValue === 'ok')
+    d.remove()
+  })
+  document.body.append(d)
+  d.showModal()
+})
+
+const unassignedOk = async (n) => !n || ask(`${n} ticket(s) have no assignee. Set due date anyway?`, 'Set due date')
 
 // Next Thursday (today if Thursday), local time, as YYYY-MM-DD.
 const nextThursday = () => {
@@ -78,7 +94,7 @@ function Row({ t, checked, onToggle, onDone }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const save = async () => {
-    if (!unassignedOk(t.assignee ? 0 : 1)) return
+    if (!(await unassignedOk(t.assignee ? 0 : 1))) return
     setBusy(true)
     setErr('')
     const e = await setDue(t.id, date)
@@ -140,7 +156,7 @@ function MyTickets() {
     setList([])
   }
   const completeAll = async () => {
-    if (!confirm(`Move all ${list.length} Ready to Deploy ticket(s) to Completed?`)) return
+    if (!(await ask(`Move all ${list.length} Ready to Deploy ticket(s) to Completed?`, 'Move all'))) return
     setBusy(true)
     setErr('')
     try {
@@ -249,7 +265,7 @@ function App() {
 
   const bulkSave = async () => {
     const ids = [...sel]
-    if (!unassignedOk(tickets.filter((t) => sel.has(t.id) && !t.assignee).length)) return
+    if (!(await unassignedOk(tickets.filter((t) => sel.has(t.id) && !t.assignee).length))) return
     setBulkBusy(true)
     setBulkErr('')
     const done = []
