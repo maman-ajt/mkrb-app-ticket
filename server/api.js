@@ -3,6 +3,16 @@ import { createHash, timingSafeEqual } from "node:crypto";
 const YT = "https://brightan.myjetbrains.com/youtrack";
 const BOARD = "Board Jobseeker App Delivery: {Current sprint}";
 const QUERY = `${BOARD} has: -{Due Date} State: {In Preparation}`;
+// Bulk "move all" transitions for the connected user: current state -> next state.
+const NEXT = {
+  "Ready for Work": "In Preparation",
+  "In Preparation": "In Development",
+  "In Development": "Ready for QA",
+  "Ready to Deploy": "Completed",
+};
+// Why a ticket may not move yet, or null. Due date is required before development starts.
+const blocked = (t) =>
+  t.state === "In Preparation" && !t.due ? "needs a due date" : null;
 
 // Hash first so lengths match, then constant-time compare.
 const sha = (v) =>
@@ -55,11 +65,12 @@ export async function handle(req, env) {
       if (!mr.ok) return json(403, { error: "Invalid token" });
       const me = await mr.json();
 
-      // My tickets waiting to ship: assigned to the token's user, in Ready to Deploy.
+      // My tickets in any movable state, assigned to the token's user, with their parent ticket.
       const mine = async () => {
-        const q = `${BOARD} for: me State: {Ready to Deploy}`;
+        const states = Object.keys(NEXT).map((s) => `{${s}}`).join(", ");
+        const q = `${BOARD} for: me State: ${states}`;
         const r = await yt(
-          `/api/issues?query=${encodeURIComponent(q)}&$top=200&fields=idReadable,summary,customFields(name,$type,value(name,login))`,
+          `/api/issues?query=${encodeURIComponent(q)}&$top=200&fields=idReadable,summary,parent(issues(idReadable,summary)),customFields(name,$type,value(name,login))`,
           {},
           tok,
         );
@@ -67,12 +78,15 @@ export async function handle(req, env) {
         if (!r.ok) throw Object.assign(new Error("youtrack"), { status: r.status, data });
         return data.map((i) => {
           const f = (n) => i.customFields?.find((x) => x.name === n);
+          const p = i.parent?.issues?.[0];
           return {
             id: i.idReadable,
             summary: i.summary,
+            parent: p ? { id: p.idReadable, summary: p.summary } : null,
             state: f("State")?.value?.name ?? null,
             stateType: f("State")?.$type,
             assignee: f("Assignee")?.value?.login,
+            due: f("Due Date")?.value ?? null,
           };
         });
       };
@@ -82,19 +96,43 @@ export async function handle(req, env) {
           const list = await mine();
           return json(200, {
             user: { login: me.login, name: me.fullName },
-            tickets: list.map(({ id, summary, state }) => ({ id, summary, state })),
+            flow: NEXT,
+            tickets: list.map((t) => ({
+              id: t.id,
+              summary: t.summary,
+              parent: t.parent,
+              state: t.state,
+              blocked: blocked(t),
+            })),
           });
         }
 
-        // Move every one of my Ready to Deploy tickets to Completed in one request.
-        if (req.method === "POST" && req.pathname === "/api/me/complete-all") {
+        // Move the given tickets (one, a selection, or all) each to the next state after its current one.
+        if (req.method === "POST" && req.pathname === "/api/me/move") {
           if (csrfBad()) return json(403, { error: "forbidden" });
-          const done = [];
+          if (req.body.length > 8192) return json(413, { error: "too large" });
+          let ids;
+          try {
+            ({ ids } = JSON.parse(req.body));
+          } catch {
+            return json(400, { error: "bad json" });
+          }
+          if (!Array.isArray(ids) || !ids.length || ids.length > 200 || !ids.every((i) => typeof i === "string"))
+            return json(400, { error: "bad ids" });
+          const want = new Set(ids);
+          const done = {};
           const failed = {};
-          for (const t of await mine()) {
-            // Only the assignee may complete: re-check, never trust the search alone.
-            if (t.assignee !== me.login || !t.stateType) {
+          // Re-fetch and re-check: only my tickets, still in a movable state, never trust the client.
+          const found = (await mine()).filter((t) => want.has(t.id));
+          for (const id of want) if (!found.some((t) => t.id === id)) failed[id] = "not yours or not movable";
+          for (const t of found) {
+            const to = Object.hasOwn(NEXT, t.state) ? NEXT[t.state] : null;
+            if (t.assignee !== me.login || !t.stateType || !to) {
               failed[t.id] = "not assigned to you";
+              continue;
+            }
+            if (blocked(t)) {
+              failed[t.id] = blocked(t);
               continue;
             }
             const r = await yt(
@@ -102,14 +140,12 @@ export async function handle(req, env) {
               {
                 method: "POST",
                 body: JSON.stringify({
-                  customFields: [
-                    { name: "State", $type: t.stateType, value: { name: "Completed" } },
-                  ],
+                  customFields: [{ name: "State", $type: t.stateType, value: { name: to } }],
                 }),
               },
               tok,
             );
-            if (r.ok) done.push(t.id);
+            if (r.ok) done[t.id] = to;
             else {
               const e = await r.json().catch(() => ({}));
               failed[t.id] = e.error_description || e.error || `HTTP ${r.status}`;
@@ -140,6 +176,31 @@ export async function handle(req, env) {
             null,
         })),
       );
+    }
+
+    // Per-developer load for the current sprint: ticket count and story points, Ready for Work excluded.
+    if (req.method === "GET" && req.pathname === "/api/dashboard") {
+      const q = `${BOARD} State: -{Ready for Work}`;
+      const issues = [];
+      for (let skip = 0; ; skip += 200) {
+        const r = await yt(
+          `/api/issues?query=${encodeURIComponent(q)}&$top=200&$skip=${skip}&fields=customFields(name,value(name))`,
+        );
+        const data = await r.json();
+        if (!r.ok) return json(r.status, data);
+        issues.push(...data);
+        if (data.length < 200) break;
+      }
+      const by = new Map();
+      for (const i of issues) {
+        const f = (n) => i.customFields?.find((x) => x.name === n)?.value;
+        const name = f("Assignee")?.name ?? null;
+        const row = by.get(name) ?? { name, tickets: 0, sp: 0 };
+        row.tickets += 1;
+        row.sp += Number(f("Story Points")) || 0;
+        by.set(name, row);
+      }
+      return json(200, [...by.values()].sort((a, b) => b.sp - a.sp || b.tickets - a.tickets));
     }
 
     const m = req.pathname.match(/^\/api\/tickets\/([\w-]+)\/due$/);

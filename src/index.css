@@ -106,10 +106,15 @@ tr.grp .count{margin:0}
 .tok .err{margin:8px 0 0}
 .mehead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px}
 .mebtns{display:flex;gap:8px;flex-wrap:wrap}
-.mylist{list-style:none;margin:0;padding:0}
-.mylist li{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 0;border-top:1px solid var(--colorOutlineGeneral)}
-.mylist a{font-weight:700;color:var(--brand-t);text-decoration:none;font-variant-numeric:tabular-nums}
-.mylist .sum{flex:1 1 240px;overflow-wrap:anywhere}
-.mylist .st{font-size:12px;padding:0 8px;border-radius:999px;background:var(--colorBgAlt);border:1px solid var(--colorOutlineGeneral)}
-.mylist .err{flex-basis:100%;margin:0}
-@media (max-width:640px){.mebtns,.mebtns button{width:100%}.mylist button{width:100%}}
+.mymove{margin:8px 0}
+.dash{margin-top:calc(var(--space)*2);padding:var(--space)}
+.dash h2{font-size:16px;margin:0 0 12px}
+.dash .scroll{border:1px solid var(--colorOutlineGeneral);border-radius:var(--rounded2Xl);overflow:auto}
+.dash .num{text-align:right;font-variant-numeric:tabular-nums}
+.dash tfoot th{border-top:1px solid var(--colorOutlineGeneral)}
+.me .scroll{margin-top:16px;border:1px solid var(--colorOutlineGeneral);border-radius:var(--rounded2Xl);overflow:auto}
+.me .st{font-size:12px;padding:0 8px;border-radius:999px;background:var(--colorBgAlt);border:1px solid var(--colorOutlineGeneral);white-space:nowrap}
+.me tr.grp a{font-weight:700;color:var(--brand-t);text-decoration:none}
+.me tr.child td:nth-child(2){padding-left:28px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (max-width:640px){.mebtns,.mebtns button{width:100%}}

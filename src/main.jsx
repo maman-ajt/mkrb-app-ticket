@@ -121,6 +121,7 @@ function MyTickets() {
   const [token, setToken] = useState(null)
   const [me, setMe] = useState(null)
   const [list, setList] = useState([])
+  const [flow, setFlow] = useState({})
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -138,6 +139,7 @@ function MyTickets() {
       setToken(tok)
       setMe(d.user)
       setList(d.tickets)
+      setFlow(d.flow)
       setInput('')
     } catch (e) {
       setErr(e.message)
@@ -155,15 +157,49 @@ function MyTickets() {
     setMe(null)
     setList([])
   }
-  const completeAll = async () => {
-    if (!(await ask(`Move all ${list.length} Ready to Deploy ticket(s) to Completed?`, 'Move all'))) return
+  const [sel, setSel] = useState(() => new Set())
+  const toggle = (ids, on) => setSel((s) => {
+    const c = new Set(s)
+    ids.forEach((i) => (on ? c.add(i) : c.delete(i)))
+    return c
+  })
+  // Group by parent: key is the parent's id, or the ticket's own id (so a parent sits with its children).
+  // Lone tickets with no parent and no children go together under "No parent".
+  // Closest to done first: Ready to Deploy on top, Ready for Work last (reverse of the flow order).
+  const groups = useMemo(() => {
+    const order = Object.keys(flow)
+    const rank = (t) => -order.indexOf(t.state)
+    const m = new Map()
+    for (const t of [...list].sort((x, y) => rank(x) - rank(y))) {
+      const k = t.parent?.id ?? t.id
+      if (!m.has(k)) m.set(k, { id: k, summary: t.parent?.summary ?? t.summary, items: [] })
+      m.get(k).items.push(t)
+    }
+    const out = []
+    const lone = { id: null, summary: 'No parent', items: [] }
+    for (const g of m.values()) {
+      if (g.items.length === 1 && g.items[0].id === g.id) lone.items.push(g.items[0])
+      else out.push({ ...g, items: g.items.sort((x, y) => (x.id === g.id ? -1 : y.id === g.id ? 1 : 0)) })
+    }
+    if (lone.items.length) out.push(lone)
+    const best = (g) => Math.min(...g.items.map(rank))
+    return out.sort((x, y) => best(x) - best(y))
+  }, [list, flow])
+  const [closed, setClosed] = useState(() => new Set())
+
+  const move = async (ids, what) => {
+    if (ids.length > 1 && !(await ask(`Move ${what} (${ids.length} tickets) to their next state?`, 'Move'))) return
     setBusy(true)
     setErr('')
     try {
-      const r = await call('/api/me/complete-all', token, { method: 'POST', body: '{}' })
+      const r = await call('/api/me/move', token, { method: 'POST', body: JSON.stringify({ ids }) })
       const d = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(d.error_description || d.error || `Failed (${r.status})`)
-      setList((l) => l.filter((t) => !d.done.includes(t.id)))
+      // Reload so moved tickets show their new state and blockers (e.g. now In Preparation without a due date).
+      const fresh = await call('/api/me', token)
+      if (fresh.ok) setList((await fresh.json()).tickets)
+      else setList((l) => l.filter((t) => !(t.id in d.done)))
+      setSel((s) => new Set([...s].filter((i) => !(i in d.done))))
       const f = Object.entries(d.failed)
       if (f.length) setErr(`${f.length} failed: ${f.slice(0, 3).map(([id, m]) => `${id} (${m})`).join('; ')}`)
     } catch (e) {
@@ -171,6 +207,9 @@ function MyTickets() {
     }
     setBusy(false)
   }
+  // Server-reported blockers (e.g. In Preparation without a due date) can't move; keep them out of bulk moves.
+  const all = list.filter((t) => !t.blocked).map((t) => t.id)
+  const picked = all.filter((i) => sel.has(i))
 
   return (
     <section className="card me" aria-label="My tickets">
@@ -196,28 +235,108 @@ function MyTickets() {
         <>
           <div className="mehead">
             <div>
-              <strong>{me.name}</strong> <span className="hint">@{me.login} · your tickets in Ready to Deploy</span>
+              <strong>{me.name}</strong> <span className="hint">@{me.login} · your tickets ready to move</span>
             </div>
             <div className="mebtns">
-              {list.length > 0 && <button className="primary" disabled={busy} onClick={completeAll}>{busy ? 'Working…' : `Move all ${list.length} to Completed`}</button>}
               <button className="ghost" onClick={logout}>Disconnect</button>
             </div>
           </div>
           {err && <p className="err" role="alert">{err}</p>}
           {list.length === 0 ? (
-            <p className="empty" role="status">No tickets in Ready to Deploy.</p>
+            <p className="empty" role="status">No tickets to move.</p>
           ) : (
-            <ul className="mylist">
-              {list.map((t) => (
-                <li key={t.id}>
-                  <a href={YT + t.id} target="_blank" rel="noreferrer">{t.id}</a>
-                  <span className="sum">{t.summary}</span>
-                  <span className="st">{t.state}</span>
-                </li>
-              ))}
-            </ul>
+            <>
+              <div className="mebtns mymove">
+                <button className="primary" disabled={busy || !picked.length} onClick={() => move(picked, 'selected')}>{busy ? 'Working…' : `Move selected (${picked.length})`}</button>
+                <button className="ghost" disabled={busy || !all.length} onClick={() => move(all, 'all')}>Move all ({all.length})</button>
+              </div>
+              <div className="scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th className="pick"><Check checked={all.length > 0 && picked.length === all.length} indeterminate={picked.length > 0 && picked.length < all.length} onChange={(e) => toggle(all, e.target.checked)} label="Select all my tickets" /></th>
+                      <th scope="col">ID</th><th scope="col">Summary</th><th scope="col">State</th><th scope="col"><span className="sr">Move</span></th>
+                    </tr>
+                  </thead>
+                  {groups.map((g) => {
+                    const ids = g.items.filter((t) => !t.blocked).map((t) => t.id)
+                    const n = ids.filter((i) => sel.has(i)).length
+                    const key = g.id ?? 'lone'
+                    const open = !closed.has(key)
+                    const name = g.id ?? 'No parent'
+                    const flip = () => setClosed((s) => {
+                      const c = new Set(s)
+                      if (open) c.add(key)
+                      else c.delete(key)
+                      return c
+                    })
+                    return (
+                      <tbody key={key}>
+                        <tr className="grp">
+                          <td colSpan={5}><div className="gb">
+                            <button className="exp" aria-expanded={open} aria-label={`${open ? 'Collapse' : 'Expand'} ${name}`} onClick={flip}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+                            </button>
+                            <label>
+                              {ids.length > 0 && <Check checked={n === ids.length} indeterminate={n > 0 && n < ids.length} onChange={(e) => toggle(ids, e.target.checked)} label={`Select all under ${name}`} />}
+                              {g.id && <a href={YT + g.id} target="_blank" rel="noreferrer">{g.id}</a>} <strong>{g.summary}</strong>
+                              <span className="count">{g.items.length}</span>
+                            </label>
+                          </div></td>
+                        </tr>
+                        {open && g.items.map((t) => (
+                          <tr key={t.id} className={t.id !== g.id && g.id ? 'child' : undefined}>
+                            <td className="pick">{!t.blocked && <Check checked={sel.has(t.id)} onChange={(e) => toggle([t.id], e.target.checked)} label={`Select ${t.id}`} />}</td>
+                            <td><a href={YT + t.id} target="_blank" rel="noreferrer">{t.id}</a></td>
+                            <td>{t.summary}</td>
+                            <td><span className="st">{t.state}</span></td>
+                            <td>{t.blocked ? <span className="hint">Can't move: {t.blocked}</span> : <button className="ghost" disabled={busy} onClick={() => move([t.id])}>To {flow[t.state]}</button>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    )
+                  })}
+                </table>
+              </div>
+            </>
           )}
         </>
+      )}
+    </section>
+  )
+}
+
+// Current sprint load per developer (Ready for Work not counted).
+function Dashboard() {
+  const [rows, setRows] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    fetch('/api/dashboard')
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(d.error_description || d.error || `Failed (${r.status})`)
+        setRows(d)
+      })
+      .catch((e) => setError(e.message))
+  }, [])
+  const total = (k) => rows.reduce((s, r) => s + r[k], 0)
+  return (
+    <section className="card dash" aria-labelledby="dash-h">
+      <h2 id="dash-h">Sprint load per developer <span className="hint">Ready for Work not counted</span></h2>
+      {error && <p className="err" role="alert">{error}</p>}
+      {!rows && !error && <div className="sk" aria-busy="true" aria-label="Loading" />}
+      {rows && (
+        <div className="scroll">
+          <table>
+            <thead><tr><th scope="col">Developer</th><th scope="col" className="num">Tickets</th><th scope="col" className="num">SP</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.name ?? NONE}><td>{r.name ?? NONE}</td><td className="num">{r.tickets}</td><td className="num">{r.sp}</td></tr>
+              ))}
+            </tbody>
+            <tfoot><tr><th scope="row">Total</th><th className="num">{total('tickets')}</th><th className="num">{total('sp')}</th></tr></tfoot>
+          </table>
+        </div>
       )}
     </section>
   )
@@ -360,6 +479,7 @@ function App() {
           </div>
         ))}
       </div>
+      <Dashboard />
       <MyTickets />
     </main>
   )
