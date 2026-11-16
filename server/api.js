@@ -70,24 +70,26 @@ export async function handle(req, env) {
         const states = Object.keys(NEXT).map((s) => `{${s}}`).join(", ");
         const q = `${BOARD} for: me State: ${states}`;
         const r = await yt(
-          `/api/issues?query=${encodeURIComponent(q)}&$top=200&fields=idReadable,summary,parent(issues(idReadable,summary)),customFields(name,$type,value(name,login))`,
+          `/api/issues?query=${encodeURIComponent(q)}&$top=200&fields=idReadable,summary,parent(issues(idReadable,summary,customFields(name,$type,value(name)))),customFields(name,$type,value(name,login))`,
           {},
           tok,
         );
         const data = await r.json();
         if (!r.ok) throw Object.assign(new Error("youtrack"), { status: r.status, data });
-        return data.map((i) => {
+        const fields = (i) => {
           const f = (n) => i.customFields?.find((x) => x.name === n);
-          const p = i.parent?.issues?.[0];
           return {
             id: i.idReadable,
             summary: i.summary,
-            parent: p ? { id: p.idReadable, summary: p.summary } : null,
             state: f("State")?.value?.name ?? null,
             stateType: f("State")?.$type,
             assignee: f("Assignee")?.value?.login,
             due: f("Due Date")?.value ?? null,
           };
+        };
+        return data.map((i) => {
+          const p = i.parent?.issues?.[0];
+          return { ...fields(i), parent: p ? fields(p) : null };
         });
       };
 
@@ -100,7 +102,7 @@ export async function handle(req, env) {
             tickets: list.map((t) => ({
               id: t.id,
               summary: t.summary,
-              parent: t.parent,
+              parent: t.parent && { id: t.parent.id, summary: t.parent.summary },
               state: t.state,
               blocked: blocked(t),
             })),
@@ -125,16 +127,7 @@ export async function handle(req, env) {
           // Re-fetch and re-check: only my tickets, still in a movable state, never trust the client.
           const found = (await mine()).filter((t) => want.has(t.id));
           for (const id of want) if (!found.some((t) => t.id === id)) failed[id] = "not yours or not movable";
-          for (const t of found) {
-            const to = Object.hasOwn(NEXT, t.state) ? NEXT[t.state] : null;
-            if (t.assignee !== me.login || !t.stateType || !to) {
-              failed[t.id] = "not assigned to you";
-              continue;
-            }
-            if (blocked(t)) {
-              failed[t.id] = blocked(t);
-              continue;
-            }
+          const setState = async (t, to) => {
             const r = await yt(
               `/api/issues/${t.id}?fields=id`,
               {
@@ -150,6 +143,23 @@ export async function handle(req, env) {
               const e = await r.json().catch(() => ({}));
               failed[t.id] = e.error_description || e.error || `HTTP ${r.status}`;
             }
+            return r.ok;
+          };
+          for (const t of found) {
+            const to = Object.hasOwn(NEXT, t.state) ? NEXT[t.state] : null;
+            if (t.assignee !== me.login || !t.stateType || !to) {
+              failed[t.id] = "not assigned to you";
+              continue;
+            }
+            if (blocked(t)) {
+              failed[t.id] = blocked(t);
+              continue;
+            }
+            if (t.id in done) continue; // already moved along with one of its children
+            if (!(await setState(t, to))) continue;
+            // The parent follows its child: if it sat in the same (not yet Completed) state, move it too.
+            const p = t.parent;
+            if (p && !(p.id in done) && p.state === t.state && p.stateType && !blocked(p)) await setState(p, to);
           }
           return json(200, { done, failed });
         }
