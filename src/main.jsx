@@ -246,15 +246,19 @@ function MyTickets() {
             <p className="empty" role="status">No tickets to move.</p>
           ) : (
             <>
-              <div className="mebtns mymove">
-                <button className="primary" disabled={busy || !picked.length} onClick={() => move(picked, 'selected')}>{busy ? 'Working…' : `Move selected (${picked.length})`}</button>
+              <div className="bulk card mymove" role="region" aria-label="Move actions">
+                <label className="all">
+                  <Check checked={all.length > 0 && picked.length === all.length} indeterminate={picked.length > 0 && picked.length < all.length} onChange={(e) => toggle(all, e.target.checked)} label="Select all my tickets" />
+                  {picked.length ? `${picked.length} selected` : 'Select all'}
+                </label>
+                <button className="primary" disabled={busy || !picked.length} onClick={() => move(picked, 'selected')}>{busy ? 'Working…' : `Move selected${picked.length ? ` (${picked.length})` : ''}`}</button>
                 <button className="ghost" disabled={busy || !all.length} onClick={() => move(all, 'all')}>Move all ({all.length})</button>
               </div>
               <div className="scroll">
                 <table>
                   <thead>
                     <tr>
-                      <th className="pick"><Check checked={all.length > 0 && picked.length === all.length} indeterminate={picked.length > 0 && picked.length < all.length} onChange={(e) => toggle(all, e.target.checked)} label="Select all my tickets" /></th>
+                      <th className="pick" />
                       <th scope="col">ID</th><th scope="col">Summary</th><th scope="col">State</th><th scope="col"><span className="sr">Move</span></th>
                     </tr>
                   </thead>

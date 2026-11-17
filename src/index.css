@@ -106,7 +106,8 @@ tr.grp .count{margin:0}
 .tok .err{margin:8px 0 0}
 .mehead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px}
 .mebtns{display:flex;gap:8px;flex-wrap:wrap}
-.mymove{margin:8px 0}
+.me{overflow:visible} /* .card clips; sticky .bulk needs an unclipped ancestor */
+.mymove{margin:8px 0 0}
 .dash{margin-top:calc(var(--space)*2);padding:var(--space)}
 .dash h2{font-size:16px;margin:0 0 12px}
 .dash .scroll{border:1px solid var(--colorOutlineGeneral);border-radius:var(--rounded2Xl);overflow:auto}
