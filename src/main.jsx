@@ -60,10 +60,62 @@ const nextThursday = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// App login session (not the YouTrack token). A 401 anywhere drops it and shows the login page.
+const SESSION = 'session'
+const session = {
+  get: () => { try { return localStorage.getItem(SESSION) } catch { return null } },
+  set: (v) => { try { localStorage.setItem(SESSION, v) } catch { /* private mode: lasts this page only */ } },
+  clear: () => { try { localStorage.removeItem(SESSION) } catch { /* ignore */ } },
+}
+const api = async (path, init = {}) => {
+  const r = await fetch(path, { ...init, headers: { ...init.headers, Authorization: `Bearer ${session.get()}` } })
+  // Only our own session check logs out; a 401 passed through from YouTrack must not.
+  if (r.status === 401 && (await r.clone().json().catch(() => ({}))).error === 'login required') {
+    session.clear()
+    window.dispatchEvent(new Event('logout'))
+  }
+  return r
+}
+
+function Login({ onIn }) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const submit = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    setErr('')
+    try {
+      const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.error || `Login failed (${r.status})`)
+      session.set(d.token)
+      onIn()
+    } catch (e) {
+      setErr(e.message)
+      setBusy(false)
+    }
+  }
+  return (
+    <main className="login">
+      <form className="card" onSubmit={submit}>
+        <h1>Sign in</h1>
+        <label htmlFor="lu">Username</label>
+        <input id="lu" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+        <label htmlFor="lp">Password</label>
+        <input id="lp" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        {err && <p className="err" role="alert">{err}</p>}
+        <button className="primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+      </form>
+    </main>
+  )
+}
+
 // Returns '' on success, else the error message.
 async function setDue(id, date) {
   try {
-    const r = await fetch(`/api/tickets/${id}/due`, {
+    const r = await api(`/api/tickets/${id}/due`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date }),
@@ -126,7 +178,7 @@ function MyTickets() {
   const [busy, setBusy] = useState(false)
 
   const call = (path, tok, init = {}) =>
-    fetch(path, { ...init, headers: { 'Content-Type': 'application/json', 'X-YouTrack-Token': tok } })
+    api(path, { ...init, headers: { 'Content-Type': 'application/json', 'X-YouTrack-Token': tok } })
 
   const connect = async (tok, persist) => {
     setBusy(true)
@@ -315,7 +367,7 @@ function Dashboard() {
   const [rows, setRows] = useState(null)
   const [error, setError] = useState('')
   useEffect(() => {
-    fetch('/api/dashboard')
+    api('/api/dashboard')
       .then(async (r) => {
         const d = await r.json().catch(() => ({}))
         if (!r.ok) throw new Error(d.error_description || d.error || `Failed (${r.status})`)
@@ -346,7 +398,7 @@ function Dashboard() {
   )
 }
 
-function App() {
+function Board() {
   const [tickets, setTickets] = useState(null)
   const [error, setError] = useState('')
   const [sel, setSel] = useState(() => new Set())
@@ -359,7 +411,7 @@ function App() {
     setTickets(null)
     setError('')
     setSel(new Set())
-    fetch('/api/tickets')
+    api('/api/tickets')
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then(setTickets)
       .catch((e) => setError(`Load failed (${e})`))
@@ -416,6 +468,7 @@ function App() {
         <div className="hbtns">
           <ThemePicker />
           <button className="ghost" onClick={load}>Refresh</button>
+          <button className="ghost" onClick={() => { session.clear(); window.dispatchEvent(new Event('logout')) }}>Log out</button>
         </div>
       </header>
 
@@ -487,6 +540,16 @@ function App() {
       <MyTickets />
     </main>
   )
+}
+
+function App() {
+  const [inside, setInside] = useState(() => !!session.get())
+  useEffect(() => {
+    const out = () => setInside(false)
+    window.addEventListener('logout', out)
+    return () => window.removeEventListener('logout', out)
+  }, [])
+  return inside ? <Board /> : <Login onIn={() => setInside(true)} />
 }
 
 createRoot(document.getElementById('root')).render(<App />)

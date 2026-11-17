@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 const YT = "https://brightan.myjetbrains.com/youtrack";
 const BOARD = "Board Jobseeker App Delivery: {Current sprint}";
@@ -23,21 +23,42 @@ const same = (a, b) => timingSafeEqual(sha(a), sha(b));
 
 const json = (status, body) => ({ status, body });
 
+// Login sessions: "<expiry ms>.<HMAC of expiry>". The key derives from the app password and server
+// token, so changing either logs everyone out. Sent as a Bearer header, never a cookie, so it works
+// inside embedded webviews (e.g. Lark) and is not auto-sent cross-site.
+const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+const sign = (env, exp) =>
+  createHmac("sha256", `session:${env.APP_PASSWORD}:${env.YOUTRACK_TOKEN}`)
+    .update(String(exp))
+    .digest("base64url");
+const validSession = (env, authorization) => {
+  const [exp, sig] = String(authorization ?? "").replace(/^Bearer /, "").split(".");
+  return Number(exp) > Date.now() && same(sig, sign(env, exp));
+};
+
 // Shared by the Vite dev/preview middleware and the Netlify function.
 // req: { method, pathname, authorization, contentType, origin, host, body }
 // Returns { status, body, headers? }; the token and login never reach the browser.
 export async function handle(req, env) {
-  const auth =
-    "Basic " +
-    Buffer.from(`${env.APP_USERNAME}:${env.APP_PASSWORD}`).toString("base64");
   if (!env.APP_USERNAME || !env.APP_PASSWORD || !env.YOUTRACK_TOKEN)
     return json(500, { error: "server not configured" });
-  if (!same(req.authorization, auth))
-    return {
-      status: 401,
-      body: "Auth required",
-      headers: { "WWW-Authenticate": 'Basic realm="tickets"' },
-    };
+
+  // Username/password in, session token out. No WWW-Authenticate anywhere: the app shows its own login page.
+  if (req.method === "POST" && req.pathname === "/api/login") {
+    if (!req.contentType?.startsWith("application/json")) return json(415, { error: "json only" });
+    let username, password;
+    try {
+      ({ username, password } = JSON.parse(req.body));
+    } catch {
+      return json(400, { error: "bad json" });
+    }
+    // Check both, always, so timing does not reveal which one was wrong.
+    const ok = same(username, env.APP_USERNAME) & same(password, env.APP_PASSWORD);
+    if (!ok) return json(401, { error: "Wrong username or password" });
+    const exp = Date.now() + SESSION_MS;
+    return json(200, { token: `${exp}.${sign(env, exp)}` });
+  }
+  if (!validSession(env, req.authorization)) return json(401, { error: "login required" });
 
   // Due-date list/save always use the server's .env token. Only /api/me/* (move my tickets)
   // passes the visitor's personal token explicitly; it is used per request and never stored.
@@ -51,7 +72,7 @@ export async function handle(req, env) {
       },
     });
 
-  // CSRF: Basic creds are auto-sent cross-site. A JSON content type forces a CORS preflight, which we never allow; also reject foreign Origins.
+  // CSRF: defence in depth (the Bearer session is never auto-sent). A JSON content type forces a CORS preflight, which we never allow; also reject foreign Origins.
   const csrfBad = () =>
     !req.contentType?.startsWith("application/json") ||
     (req.origin && new URL(req.origin).host !== req.host);
