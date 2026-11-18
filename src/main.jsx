@@ -40,7 +40,9 @@ function ThemePicker() {
 const ask = (msg, ok) => new Promise((resolve) => {
   const d = document.createElement('dialog')
   d.className = 'dlg'
-  d.innerHTML = '<p></p><form method="dialog"><button class="ghost" value="">Cancel</button><button class="primary" value="ok"></button></form>'
+  d.setAttribute('aria-labelledby', 'dlg-msg')
+  // Safe action gets focus, so a stray Enter cancels instead of confirming a bulk change.
+  d.innerHTML = '<p id="dlg-msg"></p><form method="dialog"><button class="ghost" value="" autofocus>Cancel</button><button class="primary" value="ok"></button></form>'
   d.querySelector('p').textContent = msg
   d.querySelector('.primary').textContent = ok
   d.addEventListener('close', () => {
@@ -306,7 +308,7 @@ function MyTickets() {
                 <button className="primary" disabled={busy || !picked.length} onClick={() => move(picked, 'selected')}>{busy ? 'Working…' : `Move selected${picked.length ? ` (${picked.length})` : ''}`}</button>
                 <button className="ghost" disabled={busy || !all.length} onClick={() => move(all, 'all')}>Move all ({all.length})</button>
               </div>
-              <div className="scroll">
+              <div className="scroll" tabIndex={0} role="region" aria-label="My tickets table">
                 <table>
                   <thead>
                     <tr>
@@ -382,7 +384,7 @@ function Dashboard() {
       {error && <p className="err" role="alert">{error}</p>}
       {!rows && !error && <div className="sk" aria-busy="true" aria-label="Loading" />}
       {rows && (
-        <div className="scroll">
+        <div className="scroll" tabIndex={0} role="region" aria-label="Sprint load table">
           <table>
             <thead><tr><th scope="col">Developer</th><th scope="col" className="num">Tickets</th><th scope="col" className="num">SP</th></tr></thead>
             <tbody>
@@ -499,7 +501,7 @@ function Board() {
             <p><strong>All caught up</strong><br />No tickets in this sprint's In Preparation are missing a due date.</p>
           </div>
         ) : (
-          <div className="scroll">
+          <div className="scroll" tabIndex={0} role="region" aria-label="Missing due dates table">
             <table>
               <thead><tr><th className="pick" /><th scope="col">ID</th><th scope="col">Summary</th><th scope="col">Due date</th></tr></thead>
               {groups.map(([who, list]) => {

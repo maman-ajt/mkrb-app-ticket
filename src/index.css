@@ -20,6 +20,7 @@
   --mark-dash:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='3.5' stroke-linecap='round'%3E%3Cpath d='M6 12h12'/%3E%3C/svg%3E");
 }
 *{box-sizing:border-box}
+html{scroll-padding-top:96px} /* focused rows stay visible below the sticky bulk bars */
 body{margin:0;font:400 14px/1.5 var(--font);background:var(--colorBg);color:var(--colorTxtPrimary)}
 main{max-width:1100px;margin:0 auto;padding:calc(var(--space)*2) var(--space) 64px}
 header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:var(--space)}
@@ -66,7 +67,8 @@ button.exp svg{transition:transform .15s}
 button.exp[aria-expanded=true] svg{transform:rotate(90deg)}
 .hbtns{display:flex;gap:8px}
 .dlg{background:var(--colorBgContainer);color:var(--colorTxtPrimary);border:1px solid var(--colorOutlineGeneral);border-radius:var(--rounded2Xl);padding:24px;width:min(420px,calc(100vw - 32px))}
-.dlg::backdrop{background:rgb(0 0 0/.6)}
+.dlg::backdrop{background:rgb(0 0 0/.6);overflow:hidden;overscroll-behavior:contain}
+.dlg:modal{overscroll-behavior:contain} /* no page scroll behind the confirm dialog */
 .dlg p{margin:0;font-size:16px;color:var(--colorTxtPrimaryVariant)}
 .dlg form{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
 select{cursor:pointer;appearance:none;padding-right:40px;background:var(--colorBgContainer) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center/16px}
